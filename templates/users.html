@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row-header">
+  <div>
+    <h1>Users</h1>
+    <p class="muted">Everyone who can log into the tracker. Regular users (nurses, MOs, specialists) only ever get an account here — they never need direct database access.</p>
+  </div>
+  <a class="btn" href="{{ url_for('new_user') }}">+ New user</a>
+</div>
+
+<table class="list">
+  <tr><th>Name</th><th>Username</th><th>Role</th></tr>
+  {% for u in users %}
+  <tr>
+    <td>{{ u.full_name }}</td>
+    <td>{{ u.username }}</td>
+    <td><span class="badge">{{ u.role.replace('_',' ') }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}
