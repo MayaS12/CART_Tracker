@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row-header">
+  <div>
+    <h1>{{ patient.name or patient.code }} <span class="muted">· {{ patient.age }}{{ patient.sex }}</span></h1>
+    <p class="muted">{% if patient.name %}{{ patient.code }} · {% endif %}{{ patient.diagnosis }}{% if patient.diagnosis_subtype %} ({{ patient.diagnosis_subtype }}){% endif %} · {{ patient.treating_center or 'center not set' }}</p>
+  </div>
+  <a class="btn" href="{{ url_for('new_entry', patient_id=patient.id) }}">+ New entry</a>
+</div>
+
+<div class="card baseline-card">
+  <div class="grid3">
+    <div><strong>Relapse date</strong><br>{{ patient.relapse_date or '—' }}</div>
+    <div><strong>Cytogenetics (baseline)</strong><br>{{ patient.cytogenetics_baseline or '—' }}</div>
+    <div><strong>Infusion date</strong><br>{{ patient.infusion_date or 'not yet' }}</div>
+    <div><strong>CAR-T product</strong><br>{{ patient.car_t_product or '—' }}</div>
+    <div><strong>Planned dose</strong><br>{{ patient.planned_dose or '—' }}</div>
+    <div><strong>Central line</strong><br>{{ patient.central_line_type or '—' }}{% if patient.central_line_date %} ({{ patient.central_line_date }}){% endif %}</div>
+  </div>
+  {% if patient.disease_history %}<p class="muted small history-note"><strong>History:</strong> {{ patient.disease_history }}</p>{% endif %}
+</div>
+
+<div class="timeline">
+  {% for e in entries %}
+  <div class="card entry-card {{ 'pending' if e.status == 'submitted' else '' }} {{ 'changes' if e.status == 'changes_requested' else '' }}">
+    <div class="row-header">
+      <h3>{{ e.entry_date }} — {{ e.phase }} <span class="muted">({{ e.day_relative() }})</span></h3>
+      <div class="badges">
+        <span class="badge status-{{ e.status }}">{{ e.status.replace('_',' ') }}</span>
+        {% if e.crs_grade %}<span class="badge {{ 'grade-high' if e.crs_grade >= 3 else 'grade-mid' }}">CRS G{{ e.crs_grade }}</span>{% endif %}
+        {% if e.icans_grade %}<span class="badge {{ 'grade-high' if e.icans_grade >= 3 else 'grade-mid' }}">ICANS G{{ e.icans_grade }}</span>{% endif %}
+        {% if e.car_hematotox_score is not none and e.phase == 'Conditioning' %}<span class="badge {{ 'grade-high' if e.car_hematotox_score >= 2 }}">HEMATOTOX {{ e.car_hematotox_score }}</span>{% endif %}
+      </div>
+    </div>
+    {% if e.reason_for_admission %}<p class="muted small">{{ e.reason_for_admission }}{% if e.performance_status is not none %} · PS {{ e.performance_status }}{% endif %}</p>{% endif %}
+
+    <div class="entry-summary-grid">
+      <div><strong>Vitals</strong><br>T {{ e.temp_f or '—' }}°F · P {{ e.pulse or '—' }} · BP {{ e.bp_sys or '—' }}/{{ e.bp_dia or '—' }} · SpO2 {{ e.spo2 or '—' }}%</div>
+      <div><strong>Symptoms</strong><br>{{ e.symptom_list()|join(', ') or 'none' }}</div>
+      <div><strong>Medications</strong><br>
+        {% set meds = e.med_rows() %}
+        {% if meds %}{% for m in meds %}{{ m.name }}{{ ', ' if not loop.last }}{% endfor %}{% else %}none{% endif %}
+      </div>
+    </div>
+
+    {% if e.review_comment %}<p class="muted small"><strong>Reviewer note:</strong> {{ e.review_comment }}</p>{% endif %}
+    {% if e.status == 'changes_requested' %}
+    <a class="btn small-btn" href="{{ url_for('edit_entry', entry_id=e.id) }}">Edit &amp; resubmit</a>
+    {% endif %}
+    <p class="muted small">Entered by {{ e.creator.full_name }}{% if e.reviewer %} · Reviewed by {{ e.reviewer.full_name }}{% endif %}</p>
+  </div>
+  {% else %}
+  <p class="muted">No entries yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}
