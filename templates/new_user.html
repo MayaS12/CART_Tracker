@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>New user</h1>
+  <form method="post">
+    <label>Full name <input name="full_name" required></label>
+    <label>Username <input name="username" required></label>
+    <label>Temporary password <input name="password" type="password" required></label>
+    <label>Role
+      <select name="role">
+        <option value="nurse_mo">Nurse / Medical Officer</option>
+        <option value="specialist">Specialist</option>
+        <option value="admin">Admin</option>
+      </select>
+    </label>
+    <button type="submit">Create account</button>
+  </form>
+</div>
+{% endblock %}
