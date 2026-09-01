@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row-header">
+  <div>
+    <h1>Review queue</h1>
+    <p class="muted">Entries submitted by nurses/MOs, waiting for specialist sign-off. Approving locks an entry into the patient's permanent timeline; requesting changes sends it back with your comment.</p>
+  </div>
+</div>
+
+{% if not entries %}
+  <p class="muted">Nothing pending.</p>
+{% endif %}
+
+{% for e, urgency, kind in entries %}
+<div class="card entry-card {{ 'acute-concern' if urgency.band == 'High' }}" id="entry-{{ e.id }}">
+  {% if urgency.band == 'High' %}
+  <div class="acute-banner">
+    {% if kind == 'clinical' %}⚠ Post-infusion — needs prompt review ({{ urgency.breakdown_text }}){% else %}⚠ High priority for a CAR-T slot ({{ urgency.breakdown_text }}){% endif %}
+  </div>
+  {% endif %}
+  <div class="row-header">
+    <h3>{{ e.patient.name or e.patient.code }} <span class="muted small">({{ e.patient.code }})</span> — {{ e.phase }}</h3>
+    <div class="badges">
+      <span class="badge urgency-{{ urgency.band|lower }}" title="{{ urgency.breakdown_text }}">{{ 'Clinical urgency' if kind == 'clinical' else 'Pre-treatment urgency' }}: {{ urgency.band }} ({{ urgency.score }}/{{ urgency.max }})</span>
+      {% if e.crs_grade %}<span class="badge {{ 'grade-high' if e.crs_grade >= 3 else 'grade-mid' }}">CRS G{{ e.crs_grade }}</span>{% endif %}
+      {% if e.icans_grade %}<span class="badge {{ 'grade-high' if e.icans_grade >= 3 else 'grade-mid' }}">ICANS G{{ e.icans_grade }}</span>{% endif %}
+      {% if e.car_hematotox_score is not none and e.phase == 'Conditioning' %}<span class="badge {{ 'grade-high' if e.car_hematotox_score >= 2 }}">HEMATOTOX {{ e.car_hematotox_score }}</span>{% endif %}
+    </div>
+  </div>
+  <p class="muted small">{{ e.entry_date }} ({{ e.day_relative() }}) · Submitted by {{ e.creator.full_name }} on {{ e.submitted_at.strftime('%Y-%m-%d %H:%M') }}</p>
+
+  {% if e.reason_for_admission %}<p><strong>Reason:</strong> {{ e.reason_for_admission }}{% if e.performance_status is not none %} · PS {{ e.performance_status }}{% endif %}</p>{% endif %}
+
+  <div class="entry-summary-grid">
+    <div><strong>Vitals</strong><br>T {{ e.temp_f or '—' }}°F · P {{ e.pulse or '—' }} · BP {{ e.bp_sys or '—' }}/{{ e.bp_dia or '—' }} · SpO2 {{ e.spo2 or '—' }}% · RR {{ e.rr or '—' }}</div>
+    <div><strong>Symptoms</strong><br>{{ e.symptoms_note or 'none' }}</div>
+    <div><strong>Labs</strong><br>
+      {% set ld = e.lab_dict() %}
+      {% if ld %}{% for k, v in ld.items() %}{{ k.replace('_',' ') }}: {{ v }}{{ ', ' if not loop.last }}{% endfor %}{% else %}none entered{% endif %}
+    </div>
+  </div>
+
+  {% if e.assessment_date %}
+  <p class="muted small"><strong>Disease reassessment ({{ e.assessment_date }}):</strong>
+    BM blasts {{ e.bm_blast_pct }}% · BM MRD {{ e.bm_mrd_status }} · CSF {{ e.csf_status }} · CTG {{ e.ctg_findings or '—' }} · RT-qPCR {{ e.rt_qpcr or '—' }} · Molecular {{ e.molecular_report or '—' }}</p>
+  {% endif %}
+
+  {% if e.attachments %}
+  <div class="attachment-grid">
+    {% for a in e.attachments %}
+    <div class="attachment-thumb">
+      {% if a.is_image() %}
+        <a href="{{ url_for('view_attachment', attachment_id=a.id) }}" target="_blank"><img src="{{ url_for('view_attachment', attachment_id=a.id) }}" alt="{{ a.filename }}"></a>
+      {% elif a.is_video() %}
+        <video controls src="{{ url_for('view_attachment', attachment_id=a.id) }}"></video>
+      {% else %}
+        <a href="{{ url_for('view_attachment', attachment_id=a.id) }}" target="_blank">{{ a.filename }}</a>
+      {% endif %}
+      <div class="attachment-name">{{ a.filename }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {% set meds = e.med_rows() %}
+  {% if meds %}
+  <p><strong>Medications:</strong> {% for m in meds %}{{ m.name }} ({{ m.frequency }}{% if m.dose %}, {{ m.dose }}{% endif %}){% if m.stop_date %} — stop {{ m.stop_date }}{% endif %}{{ '; ' if not loop.last }}{% endfor %}</p>
+  {% endif %}
+  {% if e.medications_plan %}<p class="muted small">{{ e.medications_plan }}</p>{% endif %}
+  {% if e.free_notes %}<p class="muted"><strong>Notes:</strong> {{ e.free_notes }}</p>{% endif %}
+
+  {% if ai_enabled %}
+    {% if ai_suggestion_entry_id == e.id %}
+      {% if ai_suggestion_text %}
+      <div class="ai-suggestion-box">
+        <strong>🤖 AI-drafted starting point — not a diagnosis or plan, review and edit before sending</strong>
+        <p>{{ ai_suggestion_text }}</p>
+      </div>
+      {% elif ai_suggestion_error %}
+      <div class="ai-suggestion-box ai-error"><strong>AI suggestion unavailable:</strong> {{ ai_suggestion_error }}</div>
+      {% endif %}
+    {% else %}
+      <a class="btn secondary small-btn" href="{{ url_for('queue', ai_suggest=e.id) }}#entry-{{ e.id }}">🤖 Get AI suggestion</a>
+    {% endif %}
+  {% endif %}
+
+  <form method="post" action="{{ url_for('review_entry', entry_id=e.id) }}" class="review-form">
+    <textarea name="comment" placeholder="Optional comment" rows="3">{{ ai_suggestion_text if ai_suggestion_entry_id == e.id and ai_suggestion_text else '' }}</textarea>
+    <button type="submit" name="decision" value="approve" class="btn">Approve</button>
+    <button type="submit" name="decision" value="request_changes" class="btn secondary">Request changes</button>
+  </form>
+</div>
+{% endfor %}
+{% endblock %}
