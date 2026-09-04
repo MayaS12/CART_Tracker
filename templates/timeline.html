@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row-header">
+  <div>
+    <h1>{{ patient.name or patient.code }} <span class="muted">· {{ patient.age }}{{ patient.sex }}</span></h1>
+    <p class="muted">{% if patient.name %}{{ patient.code }} · {% endif %}{{ patient.diagnosis }}{% if patient.diagnosis_subtype %} ({{ patient.diagnosis_subtype }}){% endif %} · {{ patient.treating_center or 'center not set' }}</p>
+  </div>
+  <a class="btn" href="{{ url_for('new_entry', patient_id=patient.id) }}">+ New entry</a>
+  <a class="btn secondary" href="{{ url_for('patient_summary_pdf', patient_id=patient.id) }}">Download PDF summary</a>
+  <a class="btn secondary" href="{{ url_for('patient_export_excel', patient_id=patient.id) }}">Download Excel</a>
+</div>
+
+{% if status %}
+<div class="card at-a-glance-card">
+  <h2 class="inline">At a glance</h2>
+  <div class="grid3">
+    <div><strong>Current stage</strong><br>{{ status.latest_entry.phase }} <span class="muted small">({{ status.latest_entry.entry_date }}, {{ status.latest_entry.day_relative() }})</span></div>
+    <div><strong>Last visit status</strong><br><span class="badge status-{{ status.latest_entry.status }}">{{ status.latest_entry.status.replace('_',' ') }}</span></div>
+    <div><strong>Last vitals</strong><br>T {{ status.latest_entry.temp_f or '—' }}°F · P {{ status.latest_entry.pulse or '—' }} · BP {{ status.latest_entry.bp_sys or '—' }}/{{ status.latest_entry.bp_dia or '—' }} · SpO2 {{ status.latest_entry.spo2 or '—' }}%</div>
+  </div>
+  <div class="grid2">
+    <div>
+      <strong>Active medications</strong><br>
+      {% if status.active_meds %}
+        {% for m in status.active_meds %}{{ m.name }}{% if m.dose %} ({{ m.dose }}{% if m.frequency %}, {{ m.frequency }}{% endif %}){% endif %}{{ ', ' if not loop.last }}{% endfor %}
+      {% else %}none on file{% endif %}
+    </div>
+    <div>
+      <strong>Needs attention</strong><br>
+      {% if status.pending_count or status.revision_count %}
+        {% if status.pending_count %}{{ status.pending_count }} entr{{ 'y' if status.pending_count == 1 else 'ies' }} awaiting review{% endif %}{% if status.pending_count and status.revision_count %} · {% endif %}{% if status.revision_count %}<a href="{{ url_for('revisions') }}">{{ status.revision_count }} needing revision</a>{% endif %}
+      {% else %}nothing pending{% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="card baseline-card">
+  <h2 class="inline">Summary</h2>
+  <div class="grid3">
+    <div><strong>Baseline diagnosis</strong><br>{{ patient.diagnosis or '—' }}{% if patient.diagnosis_subtype %} ({{ patient.diagnosis_subtype }}){% endif %}</div>
+    <div><strong>Cytogenetics</strong><br>{{ patient.cytogenetics_baseline or '—' }}</div>
+    <div><strong>Indication for CAR T-cell therapy</strong><br>{{ patient.indication_for_cart or '—' }}</div>
+    <div><strong>Infusion date</strong><br>{{ patient.infusion_date or 'not yet' }}</div>
+  </div>
+
+  <h4>Key toxicities <span class="muted small">{% if toxicities.as_of %}(most recent approved entry: {{ toxicities.as_of }}){% endif %}</span></h4>
+  <div class="grid3">
+    <div><strong>CRS grade</strong><br>{{ 'G' + toxicities.crs_grade|string if toxicities.crs_grade else '—' }}</div>
+    <div><strong>ICANS</strong><br>{{ 'G' + toxicities.icans_grade|string if toxicities.icans_grade else '—' }}</div>
+    <div><strong>IEC-HS (HLH-like)</strong><br>{{ 'Suspected' if toxicities.hlh_suspected == 'yes' else ('No' if toxicities.hlh_suspected else '—') }}</div>
+    <div><strong>Hypogammaglobulinemia</strong><br>
+      {% if toxicities.igg %}IgG {{ toxicities.igg }} mg/dL{% else %}—{% endif %}
+      <span class="hint-inline">(latest IgG shown as reported; not an automated diagnosis)</span>
+    </div>
+    <div><strong>Infections</strong><br>{{ toxicities.infection_findings or '—' }}</div>
+  </div>
+
+  {% if patient.disease_history %}<p class="muted small history-note"><strong>History:</strong> {{ patient.disease_history }}</p>{% endif %}
+
+  {% if patient.attachments %}
+  <h4>Diagnosis reports</h4>
+  <div class="attachment-grid">
+    {% for a in patient.attachments %}
+    <div class="attachment-thumb">
+      {% if a.is_image() %}
+        <a href="{{ url_for('view_attachment', attachment_id=a.id) }}" target="_blank"><img src="{{ url_for('view_attachment', attachment_id=a.id) }}" alt="{{ a.filename }}"></a>
+      {% elif a.is_video() %}
+        <video controls src="{{ url_for('view_attachment', attachment_id=a.id) }}"></video>
+      {% else %}
+        <a href="{{ url_for('view_attachment', attachment_id=a.id) }}" target="_blank">{{ a.filename }}</a>
+      {% endif %}
+      <div class="attachment-name">{{ a.filename }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="timeline">
+  {% for e in entries %}
+  <div class="card entry-card {{ 'pending' if e.status == 'submitted' else '' }} {{ 'changes' if e.status == 'changes_requested' else '' }}">
+    <div class="row-header">
+      <h3>{{ e.entry_date }} — {{ e.phase }} <span class="muted">({{ e.day_relative() }})</span></h3>
+      <div class="badges">
+        <span class="badge status-{{ e.status }}">{{ e.status.replace('_',' ') }}</span>
+        {% if e.crs_grade %}<span class="badge {{ 'grade-high' if e.crs_grade >= 3 else 'grade-mid' }}">CRS G{{ e.crs_grade }}</span>{% endif %}
+        {% if e.icans_grade %}<span class="badge {{ 'grade-high' if e.icans_grade >= 3 else 'grade-mid' }}">ICANS G{{ e.icans_grade }}</span>{% endif %}
+        {% if e.car_hematotox_score is not none and e.phase == 'Conditioning' %}<span class="badge {{ 'grade-high' if e.car_hematotox_score >= 2 }}">HEMATOTOX {{ e.car_hematotox_score }}</span>{% endif %}
+      </div>
+    </div>
+    {% if e.reason_for_admission %}<p class="muted small">{{ e.reason_for_admission }}{% if e.performance_status is not none %} · PS {{ e.performance_status }}{% endif %}</p>{% endif %}
+
+    <p class="visit-summary">{{ e.summary_text() }}</p>
+
+    <div class="entry-summary-grid">
+      <div><strong>Vitals</strong><br>T {{ e.temp_f or '—' }}°F · P {{ e.pulse or '—' }} · BP {{ e.bp_sys or '—' }}/{{ e.bp_dia or '—' }} · SpO2 {{ e.spo2 or '—' }}%</div>
+      <div><strong>Symptoms</strong><br>{{ e.symptoms_note or 'none' }}</div>
+      <div><strong>Medications</strong><br>
+        {% set meds = e.med_rows() %}
+        {% if meds %}{% for m in meds %}{{ m.name }}{{ ', ' if not loop.last }}{% endfor %}{% else %}none{% endif %}
+      </div>
+    </div>
+
+    {% if e.attachments %}
+    <div class="attachment-grid">
+      {% for a in e.attachments %}
+      <div class="attachment-thumb">
+        {% if a.is_image() %}
+          <a href="{{ url_for('view_attachment', attachment_id=a.id) }}" target="_blank"><img src="{{ url_for('view_attachment', attachment_id=a.id) }}" alt="{{ a.filename }}"></a>
+        {% elif a.is_video() %}
+          <video controls src="{{ url_for('view_attachment', attachment_id=a.id) }}"></video>
+        {% else %}
+          <a href="{{ url_for('view_attachment', attachment_id=a.id) }}" target="_blank">{{ a.filename }}</a>
+        {% endif %}
+        <div class="attachment-name">{{ a.filename }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if e.review_comment %}<p class="muted small"><strong>Reviewer note:</strong> {{ e.review_comment }}</p>{% endif %}
+    {% if e.status == 'changes_requested' %}
+    <a class="btn small-btn" href="{{ url_for('edit_entry', entry_id=e.id) }}">Edit &amp; resubmit</a>
+    {% endif %}
+    <p class="muted small">Entered by {{ e.creator.full_name }}{% if e.reviewer %} · Reviewed by {{ e.reviewer.full_name }}{% endif %}</p>
+  </div>
+  {% else %}
+  <p class="muted">No entries yet.</p>
+  {% endfor %}
+</div>
+{% endblock %}

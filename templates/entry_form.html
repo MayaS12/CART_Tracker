@@ -1,0 +1,446 @@
+{% extends "base.html" %}
+{% block content %}
+{% set cur_labs = entry.lab_dict() if entry else {} %}
+{% set cur_meds = entry.med_rows() if entry else [] %}
+{% set cur_drugs_stopped = entry.drugs_stopped_list() if entry else [] %}
+{% set cur_consumables = entry.consumables_list() if entry else [] %}
+{% set cur_cond_investigations = entry.conditioning_investigations_list() if entry else [] %}
+
+<div class="entry-header">
+  <h1>{{ 'Edit entry — resubmit for review' if entry else 'New entry' }} — {{ patient.name or patient.code }}</h1>
+  <p class="muted">{% if patient.name %}{{ patient.code }} · {% endif %}{{ patient.diagnosis }}{% if patient.diagnosis_subtype %} ({{ patient.diagnosis_subtype }}){% endif %} · {{ patient.treating_center or 'center not set' }}</p>
+  {% if entry and entry.review_comment %}
+  <div class="notice">Specialist's note: {{ entry.review_comment }}</div>
+  {% endif %}
+</div>
+
+<form method="post" class="entry-form" id="entry-form" enctype="multipart/form-data"
+      action="{{ url_for('edit_entry', entry_id=entry.id) if entry else url_for('new_entry', patient_id=patient.id) }}">
+  {% if not entry %}<input type="hidden" name="submission_token" value="{{ submission_token }}">{% endif %}
+
+  <section class="panel">
+    <h2><span class="dot dot-visit"></span>Visit</h2>
+    <div class="grid3">
+      <label>Date <input type="date" name="entry_date" value="{{ entry.entry_date.isoformat() if entry else today }}" required></label>
+      <label>Stage
+        <select name="phase" id="phase-select" required>
+          {% for ph in phases %}<option value="{{ ph }}" {{ 'selected' if entry and entry.phase == ph }}>{{ ph }}</option>{% endfor %}
+        </select>
+      </label>
+      <label>ECOG performance status
+        <select name="performance_status">
+          <option value="">—</option>
+          {% for i in range(0,5) %}<option value="{{ i }}" {{ 'selected' if entry and entry.performance_status == i }}>PS {{ i }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <label>Reason for admission / visit <input name="reason_for_admission" value="{{ entry.reason_for_admission if entry else '' }}" placeholder="e.g. Apheresis, CAR-T infusion, fever workup"></label>
+  </section>
+
+  <section class="panel">
+    <h2><span class="dot dot-vitals"></span>Vitals</h2>
+    <div class="grid3">
+      <label>Temp (°F) <input name="temp_f" type="number" step="0.1" value="{{ entry.temp_f if entry and entry.temp_f is not none else '' }}"></label>
+      <label>Pulse (/min) <input name="pulse" type="number" value="{{ entry.pulse if entry and entry.pulse is not none else '' }}"></label>
+      <label>SpO2 (%) <input name="spo2" type="number" value="{{ entry.spo2 if entry and entry.spo2 is not none else '' }}"></label>
+      <label>BP systolic <input name="bp_sys" type="number" value="{{ entry.bp_sys if entry and entry.bp_sys is not none else '' }}"></label>
+      <label>BP diastolic <input name="bp_dia" type="number" value="{{ entry.bp_dia if entry and entry.bp_dia is not none else '' }}"></label>
+      <label>RR (/min) <input name="rr" type="number" value="{{ entry.rr if entry and entry.rr is not none else '' }}"></label>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2><span class="dot dot-vitals"></span>Photos / videos</h2>
+    <p class="hint">Wound photos, rash, line-site photos, monitor screenshots, short clips — attach whatever's relevant to this visit. Max 25MB total.</p>
+    {% if entry and entry.attachments %}
+    <div class="attachment-grid">
+      {% for a in entry.attachments %}
+      <div class="attachment-thumb">
+        {% if a.is_image() %}
+          <a href="{{ url_for('view_attachment', attachment_id=a.id) }}" target="_blank"><img src="{{ url_for('view_attachment', attachment_id=a.id) }}" alt="{{ a.filename }}"></a>
+        {% elif a.is_video() %}
+          <video controls src="{{ url_for('view_attachment', attachment_id=a.id) }}"></video>
+        {% else %}
+          <a href="{{ url_for('view_attachment', attachment_id=a.id) }}" target="_blank">{{ a.filename }}</a>
+        {% endif %}
+        <div class="attachment-name">{{ a.filename }}</div>
+        <button type="button" class="btn secondary small-btn remove-attachment" data-url="{{ url_for('delete_attachment', attachment_id=a.id) }}">Remove</button>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <label>Add files <input type="file" name="attachments" accept="image/*,video/*" multiple></label>
+  </section>
+
+  <section class="panel">
+    <h2><span class="dot dot-symptoms"></span>Symptoms</h2>
+    <label>Symptoms (free text) <textarea name="symptoms_note" rows="3" placeholder="e.g. fever, headache, dizziness, confusion, diarrhea, vomiting...">{{ entry.symptoms_note if entry else '' }}</textarea></label>
+  </section>
+
+  <!-- ===== Before Apheresis ===== -->
+  <section class="panel stage-panel" data-phases="Before Apheresis">
+    <h2><span class="dot dot-stage"></span>Before Apheresis</h2>
+    <div class="grid3">
+      <label>Patient fit for procedure? <select name="apheresis_fit"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.apheresis_fit == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.apheresis_fit == 'no' }}>No</option></select></label>
+      <label>Investigations within normal limits? <select name="apheresis_labs_wnl"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.apheresis_labs_wnl == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.apheresis_labs_wnl == 'no' }}>No</option></select>
+        <span class="hint-inline">CBC, Biochemistry, SE, Coag profile, CD3/B-cell count — see Labs section below</span>
+      </label>
+      <label>Meal ≥30 min before procedure? <select name="meal_before_apheresis"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.meal_before_apheresis == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.meal_before_apheresis == 'no' }}>No</option></select></label>
+      <label>Heparin issued? <select name="heparin_issued"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.heparin_issued == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.heparin_issued == 'no' }}>No</option></select></label>
+      <label>Apheresis machine functioning? <select name="apheresis_machine_ok"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.apheresis_machine_ok == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.apheresis_machine_ok == 'no' }}>No</option></select></label>
+      <label>Non-refundable amount blocked? <select name="non_refundable_blocked"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.non_refundable_blocked == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.non_refundable_blocked == 'no' }}>No</option></select></label>
+    </div>
+    <label>Concerns <textarea name="apheresis_concerns" rows="2">{{ entry.apheresis_concerns if entry else '' }}</textarea></label>
+    <label>Final: is patient fit for apheresis? <select name="apheresis_final_fit"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.apheresis_final_fit == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.apheresis_final_fit == 'no' }}>No</option></select></label>
+
+    <h4>Drugs confirmed stopped prior to apheresis</h4>
+    <div class="checks">
+      {% for d in drugs_stopped_options %}
+      <label class="check"><input type="checkbox" name="drugs_stopped" value="{{ d }}" {{ 'checked' if d in cur_drugs_stopped }}> {{ d.replace('_',' ') }}</label>
+      {% endfor %}
+    </div>
+
+    <h4>Consumables / prep confirmed ready</h4>
+    <div class="checks">
+      {% for c in consumables_options %}
+      <label class="check"><input type="checkbox" name="consumables_ready" value="{{ c }}" {{ 'checked' if c in cur_consumables }}> {{ c.replace('_',' ') }}</label>
+      {% endfor %}
+    </div>
+    <label>Pending reports (if any) <input name="pending_reports" value="{{ entry.pending_reports if entry else '' }}"></label>
+
+    <h4>Apheresis procedure</h4>
+    <div class="grid2">
+      <label>Apheresis time/start <input name="apheresis_time" value="{{ entry.apheresis_time if entry else '' }}" placeholder="e.g. 12:04 PM"></label>
+      <label>Outcome <select name="apheresis_outcome"><option value="">—</option><option value="uneventful" {{ 'selected' if entry and entry.apheresis_outcome == 'uneventful' }}>Uneventful</option><option value="eventful" {{ 'selected' if entry and entry.apheresis_outcome == 'eventful' }}>Eventful</option></select></label>
+    </div>
+  </section>
+
+  <!-- ===== After Apheresis ===== -->
+  <section class="panel stage-panel" data-phases="After Apheresis">
+    <h2><span class="dot dot-stage"></span>After Apheresis</h2>
+    <div class="grid3">
+      <label>Bridging therapy planned? <select name="bridging_therapy_planned"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.bridging_therapy_planned == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.bridging_therapy_planned == 'no' }}>No</option></select></label>
+      <label>IT MTX given (leukemia)? <select name="it_mtx_given"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.it_mtx_given == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.it_mtx_given == 'no' }}>No</option></select></label>
+      <label>IT MTX dose <input name="it_mtx_dose" value="{{ entry.it_mtx_dose if entry else '' }}" placeholder="e.g. 12mg"></label>
+    </div>
+    <div class="grid3">
+      <label>Response assessment done? <select name="response_assessment_done" id="response-done-select"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.response_assessment_done == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.response_assessment_done == 'no' }}>No</option></select></label>
+      <label>Report <input name="response_assessment_type" value="{{ entry.response_assessment_type if entry else '' }}" placeholder="PET-CT (lymphoma) / BM studies (leukemia)"></label>
+      <label>Date <input name="response_assessment_date" type="date" value="{{ entry.response_assessment_date.isoformat() if entry and entry.response_assessment_date else '' }}"></label>
+    </div>
+    <div id="response-notes-wrap" style="display:none">
+      <label>Response assessment notes <textarea name="response_assessment_notes" rows="2">{{ entry.response_assessment_notes if entry else '' }}</textarea></label>
+    </div>
+    <label>Central line removal precautions followed? <select name="central_line_removal_precautions"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.central_line_removal_precautions == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.central_line_removal_precautions == 'no' }}>No</option><option value="na" {{ 'selected' if entry and entry.central_line_removal_precautions == 'na' }}>N/A — not removed yet</option></select></label>
+  </section>
+
+  <!-- ===== Conditioning ===== -->
+  <section class="panel stage-panel" data-phases="Conditioning">
+    <h2><span class="dot dot-stage"></span>Conditioning</h2>
+    <h4>Pre-conditioning investigations done</h4>
+    <div class="checks">
+      {% for i in conditioning_investigations_options %}
+      <label class="check"><input type="checkbox" name="conditioning_investigations_done" value="{{ i }}" {{ 'checked' if i in cur_cond_investigations }}> {{ i.replace('_',' ').upper() if i in ['cbc','ldh'] else i.replace('_',' ') }}</label>
+      {% endfor %}
+    </div>
+
+    <div class="notice notice-info">CAR-HEMATOTOX score is calculated automatically from Platelets, ANC, HB, CRP, and Ferritin in the Labs section below.
+      {% if entry and entry.car_hematotox_score is not none %}Last calculated: <strong>{{ entry.car_hematotox_score }} points — {{ entry.car_hematotox_risk }}</strong>{% endif %}
+    </div>
+
+    <label class="check-row"><input type="checkbox" name="prn_orders_confirmed" value="yes" {{ 'checked' if entry and entry.prn_orders_confirmed == 'yes' }}> Standing PRN orders confirmed (PCM, Avil, Lorazepam, Levetiracetam, BP-drop protocol, Lasix)</label>
+
+    <h4>FC protocol (Fludarabine + Cyclophosphamide)</h4>
+    <div class="grid3">
+      <label>BSA (m²) <input name="bsa" type="number" step="0.01" value="{{ entry.bsa if entry and entry.bsa is not none else '' }}"></label>
+      <label>Fludarabine given (30mg/m² D1-3)? <select name="fludarabine_given"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.fludarabine_given == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.fludarabine_given == 'no' }}>No</option></select></label>
+      <label>Fludarabine calculated dose <input name="fludarabine_dose" value="{{ entry.fludarabine_dose if entry else '' }}"></label>
+    </div>
+    <div class="grid3">
+      <label>Cyclophosphamide given (500mg/m² D1-3)? <select name="cyclophosphamide_given"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.cyclophosphamide_given == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.cyclophosphamide_given == 'no' }}>No</option></select></label>
+      <label>Cyclophosphamide calculated dose <input name="cyclophosphamide_dose" value="{{ entry.cyclophosphamide_dose if entry else '' }}"></label>
+      <label>Dose modification? <select name="dose_modification"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.dose_modification == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.dose_modification == 'no' }}>No</option></select></label>
+    </div>
+    <label>Dose modification reason <input name="dose_modification_reason" value="{{ entry.dose_modification_reason if entry else '' }}"></label>
+  </section>
+
+  <!-- ===== Pre-Infusion & CAR T-Cell Infusion ===== -->
+  <section class="panel stage-panel" data-phases="Pre-Infusion &amp; CAR T-Cell Infusion">
+    <h2><span class="dot dot-stage"></span>Eligibility (Day -1)</h2>
+    <div class="grid2">
+      <label>PS unchanged since enrollment? <select name="ps_unchanged"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.ps_unchanged == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.ps_unchanged == 'no' }}>No</option></select></label>
+      <label>Toxicities from cytoreductive chemo resolved? <select name="chemo_toxicities_resolved"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.chemo_toxicities_resolved == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.chemo_toxicities_resolved == 'no' }}>No</option></select></label>
+    </div>
+    <h4>Toxicities warranting postponement</h4>
+    <div class="grid4">
+      <label class="tiny">Pulmonary <select name="postponement_pulmonary"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.postponement_pulmonary == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.postponement_pulmonary == 'no' }}>No</option></select></label>
+      <label class="tiny">Cardiac <select name="postponement_cardiac"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.postponement_cardiac == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.postponement_cardiac == 'no' }}>No</option></select></label>
+      <label class="tiny">Hypotension needing vasopressors <select name="postponement_hypotension"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.postponement_hypotension == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.postponement_hypotension == 'no' }}>No</option></select></label>
+      <label class="tiny">Active infection <select name="postponement_infection"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.postponement_infection == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.postponement_infection == 'no' }}>No</option></select></label>
+    </div>
+    <label class="check-row"><input type="checkbox" name="prn_orders_confirmed" value="yes" {{ 'checked' if entry and entry.prn_orders_confirmed == 'yes' }}> Standing PRN orders confirmed (PCM, Avil, Lorazepam, Levetiracetam, BP-drop protocol)</label>
+
+    <h4>Fitness for infusion</h4>
+    <label>Subject fit for infusion? <select name="fit_for_infusion"><option value="">—</option><option value="yes" {{ 'selected' if entry and entry.fit_for_infusion == 'yes' }}>Yes</option><option value="no" {{ 'selected' if entry and entry.fit_for_infusion == 'no' }}>No</option></select></label>
+    <div class="grid3">
+      <label class="tiny">If No — date of reassessment <input name="delay_reassessment_date" type="date" value="{{ entry.delay_reassessment_date.isoformat() if entry and entry.delay_reassessment_date else '' }}"></label>
+      <label class="tiny">Duration of delay <input name="delay_duration" value="{{ entry.delay_duration if entry else '' }}"></label>
+      <label class="tiny">Reason for delay <input name="delay_reason" value="{{ entry.delay_reason if entry else '' }}"></label>
+    </div>
+  </section>
+
+  <section class="panel stage-panel" data-phases="Pre-Infusion &amp; CAR T-Cell Infusion">
+    <h2><span class="dot dot-stage"></span>CAR T-Cell Infusion — procedure</h2>
+    <div class="grid2">
+      <label>CAR-T dose given <input name="car_t_dose_given" value="{{ entry.car_t_dose_given if entry else '' }}" placeholder="e.g. 5.5 x 10^6"></label>
+      <label>Infusion outcome <select name="infusion_outcome"><option value="">—</option><option value="uneventful" {{ 'selected' if entry and entry.infusion_outcome == 'uneventful' }}>Uneventful</option><option value="eventful" {{ 'selected' if entry and entry.infusion_outcome == 'eventful' }}>Eventful</option></select></label>
+    </div>
+    <div class="grid4">
+      <label class="tiny">Premed start <input name="premedication_start" value="{{ entry.premedication_start if entry else '' }}" placeholder="HH:MM"></label>
+      <label class="tiny">Premed stop <input name="premedication_stop" value="{{ entry.premedication_stop if entry else '' }}" placeholder="HH:MM"></label>
+      <label class="tiny">Thaw start <input name="thaw_start" value="{{ entry.thaw_start if entry else '' }}" placeholder="HH:MM"></label>
+      <label class="tiny">Thaw stop <input name="thaw_stop" value="{{ entry.thaw_stop if entry else '' }}" placeholder="HH:MM"></label>
+      <label class="tiny">Infusion start <input name="infusion_start" value="{{ entry.infusion_start if entry else '' }}" placeholder="HH:MM"></label>
+      <label class="tiny">Infusion stop <input name="infusion_stop" value="{{ entry.infusion_stop if entry else '' }}" placeholder="HH:MM"></label>
+    </div>
+  </section>
+
+  <details class="panel stage-panel toxicity" id="toxicity-details" data-phases="Routine Visit" {{ 'open' if entry and (entry.crs_grade or entry.icans_grade or entry.hlh_suspected == 'yes' or entry.icaht_grade not in (none, 'none')) }}>
+    <summary><h2 class="inline"><span class="dot dot-crs"></span>Toxicity assessment (CRS / ICANS / ICAHT / HLH) <span class="optional-tag">mainly needed in month 1</span></h2></summary>
+
+    <h4>CRS assessment</h4>
+    <p class="hint">Grade is computed automatically from fever + the two fields below.</p>
+    <div class="grid3">
+      <label>Fever present?
+        <select name="fever_present">
+          <option value="no" {{ 'selected' if not entry or not entry.fever_present }}>No</option>
+          <option value="yes" {{ 'selected' if entry and entry.fever_present }}>Yes</option>
+        </select>
+      </label>
+      <label>Hypotension
+        <select name="hypotension_level">
+          {% set hl = entry.hypotension_level if entry else 'none' %}
+          <option value="none" {{ 'selected' if hl == 'none' }}>None</option>
+          <option value="fluids" {{ 'selected' if hl == 'fluids' }}>Fluids, no vasopressor</option>
+          <option value="one_vasopressor" {{ 'selected' if hl == 'one_vasopressor' }}>One vasopressor</option>
+          <option value="multi_vasopressor" {{ 'selected' if hl == 'multi_vasopressor' }}>Multiple vasopressors</option>
+        </select>
+      </label>
+      <label>Hypoxia
+        <select name="hypoxia_level">
+          {% set hx = entry.hypoxia_level if entry else 'none' %}
+          <option value="none" {{ 'selected' if hx == 'none' }}>None</option>
+          <option value="low_flow" {{ 'selected' if hx == 'low_flow' }}>Low-flow O2</option>
+          <option value="high_flow_or_mask" {{ 'selected' if hx == 'high_flow_or_mask' }}>High-flow NC / non-rebreather / Venturi</option>
+          <option value="positive_pressure" {{ 'selected' if hx == 'positive_pressure' }}>CPAP / BiPAP / mechanical ventilation</option>
+        </select>
+      </label>
+    </div>
+    {% if entry %}<p class="muted small">Last computed grade: CRS G{{ entry.crs_grade }}</p>{% endif %}
+
+    <h4>ICANS / ICE score</h4>
+    <p class="hint">Grade is computed automatically from these inputs.</p>
+    <div class="grid5">
+      <label class="tiny">Orientation (0-4) <input name="ice_orientation" type="number" min="0" max="4" value="{{ entry.ice_orientation if entry else 4 }}"></label>
+      <label class="tiny">Naming (0-3) <input name="ice_naming" type="number" min="0" max="3" value="{{ entry.ice_naming if entry else 3 }}"></label>
+      <label class="tiny">Commands (0-1) <input name="ice_command" type="number" min="0" max="1" value="{{ entry.ice_command if entry else 1 }}"></label>
+      <label class="tiny">Writing (0-1) <input name="ice_writing" type="number" min="0" max="1" value="{{ entry.ice_writing if entry else 1 }}"></label>
+      <label class="tiny">Attention (0-1) <input name="ice_attention" type="number" min="0" max="1" value="{{ entry.ice_attention if entry else 1 }}"></label>
+    </div>
+    <div class="grid4">
+      <label>Consciousness
+        <select name="consciousness_level">
+          {% set cl = entry.consciousness_level if entry else 'spontaneous' %}
+          <option value="spontaneous" {{ 'selected' if cl == 'spontaneous' }}>Awakens spontaneously</option>
+          <option value="voice" {{ 'selected' if cl == 'voice' }}>Awakens to voice</option>
+          <option value="tactile" {{ 'selected' if cl == 'tactile' }}>Awakens to tactile stimulus</option>
+          <option value="unarousable" {{ 'selected' if cl == 'unarousable' }}>Unarousable</option>
+        </select>
+      </label>
+      <label>Seizure
+        <select name="seizure_status">
+          {% set sz = entry.seizure_status if entry else 'none' %}
+          <option value="none" {{ 'selected' if sz == 'none' }}>None</option>
+          <option value="resolves_lt5min" {{ 'selected' if sz == 'resolves_lt5min' }}>Resolves in &lt;5 min</option>
+          <option value="prolonged_or_recurrent" {{ 'selected' if sz == 'prolonged_or_recurrent' }}>Prolonged (&ge;5 min) or recurrent</option>
+        </select>
+      </label>
+      <label>Motor findings
+        <select name="motor_findings">
+          {% set mf = entry.motor_findings if entry else 'none' %}
+          <option value="none" {{ 'selected' if mf == 'none' }}>None</option><option value="focal_weakness" {{ 'selected' if mf == 'focal_weakness' }}>Focal weakness</option>
+        </select>
+      </label>
+      <label>Cerebral edema (imaging)
+        <select name="cerebral_edema">
+          {% set ce = entry.cerebral_edema if entry else 'none' %}
+          <option value="none" {{ 'selected' if ce == 'none' }}>None</option><option value="focal" {{ 'selected' if ce == 'focal' }}>Focal</option><option value="diffuse" {{ 'selected' if ce == 'diffuse' }}>Diffuse</option>
+        </select>
+      </label>
+    </div>
+    {% if entry %}<p class="muted small">Last computed grade: ICANS G{{ entry.icans_grade }} (ICE {{ entry.ice_score }}/10)</p>{% endif %}
+
+    <h4>ICAHT / HLH tracking</h4>
+    <div class="grid2">
+      <label>ICAHT grade
+        <select name="icaht_grade">{% for g in icaht_grades %}<option value="{{ g }}" {{ 'selected' if entry and entry.icaht_grade == g }}>{{ g }}</option>{% endfor %}</select>
+      </label>
+      <label>HLH-like syndrome suspected?
+        <select name="hlh_suspected"><option value="no" {{ 'selected' if not entry or entry.hlh_suspected != 'yes' }}>No</option><option value="yes" {{ 'selected' if entry and entry.hlh_suspected == 'yes' }}>Yes</option></select>
+      </label>
+    </div>
+    <label>HLH notes (ferritin trend, fibrinogen, cytopenia course) <textarea name="hlh_note" rows="2">{{ entry.hlh_note if entry else '' }}</textarea></label>
+
+    <h4>Infections</h4>
+    <label>Infections (free text) <textarea name="infection_note" rows="2" placeholder="e.g. blood culture positive for X, treated with Y">{{ entry.infection_note if entry else '' }}</textarea></label>
+
+    <h4>Other</h4>
+    <label>Other toxicity / concern (free text) <textarea name="other_toxicity_note" rows="2">{{ entry.other_toxicity_note if entry else '' }}</textarea></label>
+  </details>
+
+  <!-- ===== Routine Visit — disease reassessment ===== -->
+  <details class="panel stage-panel" data-phases="Routine Visit" {{ 'open' if entry and entry.assessment_date }}>
+    <summary><h2 class="inline"><span class="dot dot-disease"></span>Disease reassessment</h2></summary>
+    <div class="grid3">
+      <label>Assessment date <input name="assessment_date" type="date" value="{{ entry.assessment_date.isoformat() if entry and entry.assessment_date else '' }}"></label>
+      <label>BM blast % <input name="bm_blast_pct" type="number" step="0.01" value="{{ entry.bm_blast_pct if entry and entry.bm_blast_pct is not none else '' }}"></label>
+      <label>BM MRD (flow)
+        <select name="bm_mrd_status"><option value="">—</option>{% for o in bm_mrd_options %}<option value="{{ o }}" {{ 'selected' if entry and entry.bm_mrd_status == o }}>{{ o.replace('_',' ') }}</option>{% endfor %}</select>
+      </label>
+      <label>CSF status
+        <select name="csf_status"><option value="">—</option>{% for o in csf_status_options %}<option value="{{ o }}" {{ 'selected' if entry and entry.csf_status == o }}>{{ o.replace('_',' ') }}</option>{% endfor %}</select>
+      </label>
+      <label>Cytogenetics findings <input name="ctg_findings" value="{{ entry.ctg_findings if entry else '' }}" placeholder="free text"></label>
+      <label>RT-qPCR <input name="rt_qpcr" value="{{ entry.rt_qpcr if entry else '' }}" placeholder="free text"></label>
+      <label>Molecular report <input name="molecular_report" value="{{ entry.molecular_report if entry else '' }}" placeholder="free text"></label>
+    </div>
+  </details>
+
+  <section class="panel">
+    <h2><span class="dot dot-labs"></span>Labs</h2>
+    <p class="hint">Observed value + normal range for reference — some ranges are illustrative where a lab-specific range wasn't supplied; confirm with Dr. Jain before relying on them clinically.</p>
+    {% for group_name, fields in lab_groups.items() %}
+    <div class="lab-group {{ 'stage-panel' if group_name in phase_only_lab_groups }}"
+         {% if group_name in phase_only_lab_groups %}data-phases="{{ phase_only_lab_groups[group_name] }}"{% endif %}>
+      <h4>{{ group_name }}</h4>
+      <div class="grid5">
+        {% for lab in fields %}
+        <label class="tiny">{{ lab_labels.get(lab, lab.replace('_',' ').upper()) }}{% if lab_reference.get(lab) %} <span class="unit">({{ lab_reference[lab] }})</span>{% endif %}
+          <input name="lab_{{ lab }}" value="{{ cur_labs.get(lab, '') }}">
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </section>
+
+  <section class="panel">
+    <h2><span class="dot dot-plan"></span>Medications</h2>
+    <table class="med-table" id="med-table">
+      <thead><tr><th>Drug name</th><th>Frequency</th><th>Dose</th><th>Start date</th><th>Stop date</th><th></th></tr></thead>
+      <tbody id="med-table-body">
+        {% for row in cur_meds %}
+        <tr>
+          <td><input name="med_name" value="{{ row.name }}"></td>
+          <td><input name="med_freq" value="{{ row.frequency }}"></td>
+          <td><input name="med_dose" value="{{ row.dose }}"></td>
+          <td><input name="med_start" type="date" value="{{ row.start_date }}"></td>
+          <td><input name="med_stop" type="date" value="{{ row.stop_date }}"></td>
+          <td><button type="button" class="btn secondary small-btn remove-row">Remove</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="button" class="btn secondary small-btn" id="add-med-row">+ Add drug</button>
+
+    <label style="margin-top:1rem">Medications / plan notes (free text)
+      <textarea name="medications_plan" rows="3">{{ entry.medications_plan if entry else '' }}</textarea>
+    </label>
+    <label>Free notes <textarea name="free_notes" rows="3">{{ entry.free_notes if entry else '' }}</textarea></label>
+  </section>
+
+  <button type="submit" class="submit-btn" id="submit-btn">{{ 'Resubmit for specialist review' if entry else 'Submit for specialist review' }}</button>
+</form>
+
+<template id="med-row-template">
+  <tr>
+    <td><input name="med_name"></td>
+    <td><input name="med_freq"></td>
+    <td><input name="med_dose"></td>
+    <td><input name="med_start" type="date"></td>
+    <td><input name="med_stop" type="date"></td>
+    <td><button type="button" class="btn secondary small-btn remove-row">Remove</button></td>
+  </tr>
+</template>
+
+<script>
+(function () {
+  var phaseSelect = document.getElementById('phase-select');
+  var panels = document.querySelectorAll('.stage-panel');
+
+  function applyPhase() {
+    var phase = phaseSelect.value;
+    panels.forEach(function (panel) {
+      var allowed = (panel.getAttribute('data-phases') || '').split(',').map(function (s) { return s.trim(); });
+      panel.style.display = (allowed.indexOf(phase) !== -1) ? '' : 'none';
+    });
+  }
+
+  phaseSelect.addEventListener('change', applyPhase);
+  applyPhase();
+
+  var toxicityDetails = document.getElementById('toxicity-details');
+  var feverSelect = document.querySelector('select[name="fever_present"]');
+  if (feverSelect) {
+    feverSelect.addEventListener('change', function () {
+      if (feverSelect.value === 'yes' && toxicityDetails) {
+        toxicityDetails.open = true;
+      }
+    });
+  }
+
+  var responseSelect = document.getElementById('response-done-select');
+  var responseNotesWrap = document.getElementById('response-notes-wrap');
+  function applyResponseNotes() {
+    responseNotesWrap.style.display = (responseSelect.value === 'yes') ? '' : 'none';
+  }
+  if (responseSelect) {
+    responseSelect.addEventListener('change', applyResponseNotes);
+    applyResponseNotes();
+  }
+
+  var tableBody = document.getElementById('med-table-body');
+  var template = document.getElementById('med-row-template');
+  document.getElementById('add-med-row').addEventListener('click', function () {
+    var clone = template.content.cloneNode(true);
+    tableBody.appendChild(clone);
+  });
+  document.getElementById('entry-form').addEventListener('click', function (e) {
+    if (e.target.classList.contains('remove-row')) {
+      e.target.closest('tr').remove();
+    }
+    if (e.target.classList.contains('remove-attachment')) {
+      if (!confirm('Remove this attachment?')) return;
+      var f = document.createElement('form');
+      f.method = 'post';
+      f.action = e.target.getAttribute('data-url');
+      document.body.appendChild(f);
+      f.submit();
+    }
+  });
+
+  var mainForm = document.getElementById('entry-form');
+  var submitBtn = document.getElementById('submit-btn');
+  var alreadySubmitted = false;
+  mainForm.addEventListener('submit', function (e) {
+    if (alreadySubmitted) {
+      e.preventDefault();
+      return;
+    }
+    alreadySubmitted = true;
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Submitting\u2026 (this can take longer if a photo/video is attached, please wait)';
+  });
+})();
+</script>
+{% endblock %}
